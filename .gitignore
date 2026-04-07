@@ -12,6 +12,7 @@
 
 # production
 /build
+/dist
 
 # env
 .env
@@ -37,6 +38,7 @@ pnpm-debug.log*
 # cache and temp
 *.tsbuildinfo
 .eslintcache
+server/data/
 
 # system files
 Thumbs.db

@@ -140,7 +140,14 @@ body {
   line-height: 1.5;
 }
 
+.error-copy {
+  margin: 14px 0 0;
+  color: #ff9696;
+  line-height: 1.5;
+}
+
 .contact-list {
+  flex: 1;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -418,6 +425,76 @@ body {
   font-weight: 700;
 }
 
+.empty-contacts,
+.chat-empty-state {
+  margin: auto;
+  max-width: 360px;
+  padding: 28px;
+  border: 1px solid rgba(129, 150, 185, 0.12);
+  border-radius: 26px;
+  background: rgba(17, 27, 45, 0.82);
+  text-align: center;
+}
+
+.empty-contacts h2,
+.chat-empty-state h3,
+.add-contact-modal h2 {
+  margin: 0;
+}
+
+.empty-contacts p,
+.chat-empty-state p,
+.add-contact-modal p {
+  margin: 12px 0 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.floating-action-button {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  width: 64px;
+  height: 64px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2d7cff, #1f66ff);
+  color: #ffffff;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 18px 36px rgba(13, 72, 189, 0.35);
+  cursor: pointer;
+}
+
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 13, 0.7);
+}
+
+.add-contact-modal {
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(129, 150, 185, 0.14);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(11, 19, 35, 0.98), rgba(8, 14, 25, 0.98));
+}
+
+.modal-actions {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.modal-actions .secondary-button,
+.modal-actions .primary-button {
+  margin-top: 0;
+}
+
 .settings-placeholder {
   min-height: 220px;
 }
@@ -449,6 +526,7 @@ body {
 
   .sidebar {
     border-right: 0;
+    position: relative;
   }
 
   .contact-list {
@@ -493,5 +571,14 @@ body {
 
   .composer button {
     min-height: 52px;
+  }
+
+  .floating-action-button {
+    right: 20px;
+    bottom: 20px;
+  }
+
+  .modal-actions {
+    grid-template-columns: 1fr;
   }
 }

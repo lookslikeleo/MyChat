@@ -1,22 +1,14 @@
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import './App.css';
-
-type Message = {
-  id: number;
-  text: string;
-  time: string;
-  sender: 'me' | 'contact';
-};
-
-type Contact = {
-  id: number;
-  name: string;
-  status: string;
-  phone: string;
-  lastSeen: string;
-  accent: string;
-  messages: Message[];
-};
+import {
+  ApiContact,
+  ApiMessage,
+  createChat,
+  fetchChats,
+  fetchMessages,
+  registerProfile,
+  sendMessage
+} from './api';
 
 type UserProfile = {
   username: string;
@@ -24,66 +16,25 @@ type UserProfile = {
 };
 
 const STORAGE_KEY = 'mychat-user-profile';
+const accents = ['#58a6ff', '#ff8a5b', '#4bb7a8', '#c587ff', '#ff6fa8', '#6c8cff'];
 
-const contacts: Contact[] = [
-  {
-    id: 1,
-    name: 'Maya Chen',
-    status: 'Online now',
-    phone: '+49 152 1448 2291',
-    lastSeen: 'Seen 2 min ago',
-    accent: '#ff8a5b',
-    messages: [
-      { id: 1, text: 'Hey, are we still meeting after work?', time: '18:04', sender: 'contact' },
-      { id: 2, text: 'Yes, let us do 7:30 near the station.', time: '18:06', sender: 'me' },
-      { id: 3, text: 'Perfect. I will send the table number when I get there.', time: '18:08', sender: 'contact' },
-    ],
-  },
-  {
-    id: 2,
-    name: 'Daniel Brooks',
-    status: 'Typing a lot',
-    phone: '+49 176 9012 4731',
-    lastSeen: 'Seen just now',
-    accent: '#4bb7a8',
-    messages: [
-      { id: 1, text: 'Can you review the homepage copy later?', time: '15:20', sender: 'contact' },
-      { id: 2, text: 'Sure, send me the draft and I will mark it up.', time: '15:24', sender: 'me' },
-      { id: 3, text: 'Nice, I am cleaning it up now.', time: '15:27', sender: 'contact' },
-    ],
-  },
-  {
-    id: 3,
-    name: 'Sofia Alvarez',
-    status: 'Last active today',
-    phone: '+49 157 3388 6190',
-    lastSeen: 'Seen 45 min ago',
-    accent: '#6c8cff',
-    messages: [
-      { id: 1, text: 'I dropped the photos into the shared folder.', time: '11:42', sender: 'contact' },
-      { id: 2, text: 'Amazing, I will pull the best ones for the post.', time: '11:46', sender: 'me' },
-    ],
-  },
-  {
-    id: 4,
-    name: 'Liam Foster',
-    status: 'Offline',
-    phone: '+49 162 7799 5021',
-    lastSeen: 'Seen yesterday',
-    accent: '#ff6fa8',
-    messages: [
-      { id: 1, text: 'Movie night at mine on Friday?', time: 'Yesterday', sender: 'contact' },
-      { id: 2, text: 'I am in. Bring snacks and I will bring the bad opinions.', time: 'Yesterday', sender: 'me' },
-    ],
-  },
-];
+function accentForUsername(username: string) {
+  const total = username.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return accents[total % accents.length];
+}
 
 function App() {
   const [activeContactId, setActiveContactId] = useState<number | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAddContactOpen, setIsAddContactOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [usernameInput, setUsernameInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [contactUsernameInput, setContactUsernameInput] = useState('');
+  const [draftMessage, setDraftMessage] = useState('');
+  const [contacts, setContacts] = useState<ApiContact[]>([]);
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
+  const [connectionError, setConnectionError] = useState('');
 
   useEffect(() => {
     const savedProfile = window.localStorage.getItem(STORAGE_KEY);
@@ -103,7 +54,7 @@ function App() {
       ) {
         setUserProfile({
           username: parsedProfile.username.trim(),
-          displayName: parsedProfile.displayName.trim(),
+          displayName: parsedProfile.displayName.trim()
         });
       }
     } catch {
@@ -113,7 +64,95 @@ function App() {
 
   const activeContact = contacts.find((contact) => contact.id === activeContactId) ?? null;
 
-  const handleCreateProfile = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (!userProfile) {
+      return;
+    }
+
+    registerProfile(userProfile).catch(() => {
+      setConnectionError('Could not sync your profile with the local backend.');
+    });
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (!userProfile) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadChats = async () => {
+      try {
+        const nextContacts = await fetchChats(userProfile.username);
+
+        if (!cancelled) {
+          setContacts(nextContacts);
+          setConnectionError('');
+          setActiveContactId((currentId) => {
+            if (!currentId) {
+              return currentId;
+            }
+
+            return nextContacts.some((contact) => contact.id === currentId) ? currentId : null;
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setConnectionError('Local backend not reachable. Start `npm run server`.');
+        }
+      }
+    };
+
+    loadChats();
+    const intervalId = window.setInterval(loadChats, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [userProfile]);
+
+  useEffect(() => {
+    if (!userProfile || !activeContactId) {
+      setMessages([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMessages = async () => {
+      try {
+        const nextMessages = await fetchMessages(activeContactId, userProfile.username);
+
+        if (!cancelled) {
+          setMessages(nextMessages);
+          setConnectionError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setConnectionError('Could not load messages from the local backend.');
+        }
+      }
+    };
+
+    loadMessages();
+    const intervalId = window.setInterval(loadMessages, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeContactId, userProfile]);
+
+  const conversationSubtitle = useMemo(() => {
+    if (!activeContact) {
+      return '';
+    }
+
+    return `@${activeContact.username}`;
+  }, [activeContact]);
+
+  const handleCreateProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const normalizedUsername = usernameInput.trim().replace(/\s+/g, '').toLowerCase();
@@ -125,11 +164,76 @@ function App() {
 
     const nextProfile = {
       username: normalizedUsername,
-      displayName: normalizedDisplayName,
+      displayName: normalizedDisplayName
     };
 
-    setUserProfile(nextProfile);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProfile));
+    try {
+      await registerProfile(nextProfile);
+      setUserProfile(nextProfile);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextProfile));
+      setConnectionError('');
+    } catch {
+      setConnectionError('Could not save your profile. Make sure the local backend is running.');
+    }
+  };
+
+  const handleAddContact = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!userProfile) {
+      return;
+    }
+
+    const normalizedUsername = contactUsernameInput.trim().replace(/\s+/g, '').toLowerCase();
+
+    if (!normalizedUsername) {
+      return;
+    }
+
+    try {
+      const chat = await createChat(userProfile.username, normalizedUsername);
+      setIsAddContactOpen(false);
+      setContactUsernameInput('');
+      setActiveContactId(chat.id);
+      setConnectionError('');
+      setContacts((currentContacts) => {
+        const exists = currentContacts.some((contact) => contact.id === chat.id);
+
+        if (exists) {
+          return currentContacts;
+        }
+
+        return [
+          {
+            ...chat,
+            lastMessageText: '',
+            lastMessageTime: '',
+            updatedAt: new Date().toISOString()
+          },
+          ...currentContacts
+        ];
+      });
+    } catch {
+      setConnectionError('Could not create the chat. Make sure the backend is running.');
+    }
+  };
+
+  const handleSendMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!activeContact || !userProfile || !draftMessage.trim()) {
+      return;
+    }
+
+    try {
+      await sendMessage(activeContact.id, userProfile.username, draftMessage.trim());
+      setDraftMessage('');
+      setConnectionError('');
+      setMessages(await fetchMessages(activeContact.id, userProfile.username));
+      setContacts(await fetchChats(userProfile.username));
+    } catch {
+      setConnectionError('Could not send the message. Make sure the backend is running.');
+    }
   };
 
   if (!userProfile) {
@@ -170,6 +274,8 @@ function App() {
                 Continue to chats
               </button>
             </form>
+
+            {connectionError ? <p className="error-copy">{connectionError}</p> : null}
           </section>
         </section>
       </main>
@@ -195,7 +301,9 @@ function App() {
                   <span
                     className="avatar large"
                     style={{
-                      background: `linear-gradient(135deg, ${activeContact.accent}, #ffffff)`,
+                      background: `linear-gradient(135deg, ${accentForUsername(
+                        activeContact.username
+                      )}, #ffffff)`
                     }}
                     aria-hidden="true"
                   >
@@ -208,45 +316,54 @@ function App() {
 
                   <div>
                     <h2>{activeContact.name}</h2>
-                    <p>{activeContact.status}</p>
+                    <p>{conversationSubtitle}</p>
                   </div>
                 </div>
               </div>
 
               <div className="conversation-actions">
-                <span>{activeContact.phone}</span>
-                <span>{activeContact.lastSeen}</span>
+                <span>@{activeContact.username}</span>
+                <span>Local backend sync</span>
               </div>
             </header>
 
             <div className="message-thread">
-              <div className="thread-date">Today</div>
+              {messages.length > 0 ? (
+                <>
+                  <div className="thread-date">Now</div>
 
-              {activeContact.messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`message-row ${message.sender === 'me' ? 'outgoing' : 'incoming'}`}
-                >
-                  <div className="message-bubble">
-                    <p>{message.text}</p>
-                    <span>{message.time}</span>
-                  </div>
-                </article>
-              ))}
+                  {messages.map((message) => (
+                    <article
+                      key={message.id}
+                      className={`message-row ${message.sender === 'me' ? 'outgoing' : 'incoming'}`}
+                    >
+                      <div className="message-bubble">
+                        <p>{message.text}</p>
+                        <span>{message.time}</span>
+                      </div>
+                    </article>
+                  ))}
+                </>
+              ) : (
+                <div className="chat-empty-state">
+                  <h3>Start chatting with @{activeContact.username}</h3>
+                  <p>This chat is synced through your local SQLite backend.</p>
+                </div>
+              )}
             </div>
 
-            <footer className="composer">
+            <form className="composer" onSubmit={handleSendMessage}>
               <label className="composer-field">
                 <span className="sr-only">Message input</span>
                 <input
                   type="text"
-                  value=""
-                  readOnly
-                  placeholder={`Message ${activeContact.name}...`}
+                  value={draftMessage}
+                  onChange={(event) => setDraftMessage(event.target.value)}
+                  placeholder={`Message @${activeContact.username}...`}
                 />
               </label>
-              <button type="button">Send</button>
-            </footer>
+              <button type="submit">Send</button>
+            </form>
           </section>
         ) : (
           <aside className="sidebar">
@@ -281,45 +398,104 @@ function App() {
                   </div>
                   <h1>{userProfile.displayName}'s chats</h1>
                   <p className="sidebar-copy">@{userProfile.username}</p>
+                  {connectionError ? <p className="error-copy">{connectionError}</p> : null}
                 </>
               )}
             </div>
 
             {!isSettingsOpen ? (
-              <div className="contact-list" aria-label="Contact list">
-                {contacts.map((contact) => {
-                  const lastMessage = contact.messages[contact.messages.length - 1];
-
-                  return (
-                    <button
-                      key={contact.id}
-                      className="contact-card"
-                      onClick={() => setActiveContactId(contact.id)}
-                      type="button"
-                    >
-                      <span
-                        className="avatar"
-                        style={{ background: `linear-gradient(135deg, ${contact.accent}, #ffffff)` }}
-                        aria-hidden="true"
+              <>
+                <div className="contact-list" aria-label="Contact list">
+                  {contacts.length > 0 ? (
+                    contacts.map((contact) => (
+                      <button
+                        key={contact.id}
+                        className="contact-card"
+                        onClick={() => setActiveContactId(contact.id)}
+                        type="button"
                       >
-                        {contact.name
-                          .split(' ')
-                          .map((part) => part[0])
-                          .join('')
-                          .slice(0, 2)}
-                      </span>
-
-                      <span className="contact-meta">
-                        <span className="contact-topline">
-                          <span className="contact-name">{contact.name}</span>
-                          <span className="contact-time">{lastMessage.time}</span>
+                        <span
+                          className="avatar"
+                          style={{
+                            background: `linear-gradient(135deg, ${accentForUsername(
+                              contact.username
+                            )}, #ffffff)`
+                          }}
+                          aria-hidden="true"
+                        >
+                          {contact.name
+                            .split(' ')
+                            .map((part) => part[0])
+                            .join('')
+                            .slice(0, 2)}
                         </span>
-                        <span className="contact-preview">{lastMessage.text}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+
+                        <span className="contact-meta">
+                          <span className="contact-topline">
+                            <span className="contact-name">{contact.name}</span>
+                            <span className="contact-time">
+                              {contact.lastMessageTime || 'New'}
+                            </span>
+                          </span>
+                          <span className="contact-preview">
+                            {contact.lastMessageText || '@' + contact.username}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="empty-contacts">
+                      <h2>No contacts yet</h2>
+                      <p>Tap the plus button to add a username and start a synced chat.</p>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  aria-label="Add contact"
+                  className="floating-action-button"
+                  onClick={() => setIsAddContactOpen(true)}
+                  type="button"
+                >
+                  +
+                </button>
+
+                {isAddContactOpen ? (
+                  <div className="modal-overlay" role="dialog" aria-modal="true">
+                    <form className="add-contact-modal" onSubmit={handleAddContact}>
+                      <h2>Add by username</h2>
+                      <p>Enter a username to create a synced local chat for that person.</p>
+
+                      <label className="profile-field">
+                        <span>Username</span>
+                        <input
+                          autoFocus
+                          onChange={(event) => setContactUsernameInput(event.target.value)}
+                          placeholder="friendname"
+                          type="text"
+                          value={contactUsernameInput}
+                        />
+                      </label>
+
+                      <div className="modal-actions">
+                        <button
+                          className="secondary-button"
+                          onClick={() => {
+                            setIsAddContactOpen(false);
+                            setContactUsernameInput('');
+                          }}
+                          type="button"
+                        >
+                          Cancel
+                        </button>
+                        <button className="primary-button" type="submit">
+                          Add chat
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="settings-empty-panel" aria-label="Settings placeholder" />
             )}
